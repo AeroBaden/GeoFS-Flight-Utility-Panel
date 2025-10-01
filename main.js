@@ -1,200 +1,272 @@
 // ==UserScript==
 // @name         GeoFS Flight Utility Panel
-// @version      1.8
-// @description  GeoFS panel: Flight timer, Fuel (manual), Logbook (TXT), Route Time Calculator. Author: AeroBaden
+// @version      1.0
+// @description  A utility panel for GeoFS: Timer, Fuel, Logbook, Route Calculator, and Emergency Squawk Codes
 // @author       AeroBaden
 // @match        https://www.geo-fs.com/geofs.php?v=*
 // @match        https://*.geo-fs.com/geofs.php*
 // @grant        none
 // ==/UserScript==
 
-(function(){
-'use strict';
+(function() {
+    'use strict';
 
-if(window.geofsUtilityPanel) return;
+    if (window.geofsUtilityPanel) return;
 
-// ---------- Panel UI ----------
-function createPanel(){
-    const panel=document.createElement('div');
-    panel.id='geofs-utility-panel';
-    panel.classList.add('hidden');
-    panel.innerHTML=`
-        <style>
-            #geofs-utility-panel {position:fixed;bottom:50px;left:10px;width:360px;background:rgba(30,41,59,0.95);color:white;border-radius:12px;padding:10px;font-family:'Segoe UI',sans-serif;box-shadow:0 8px 32px rgba(0,0,0,0.4);border:1px solid rgba(255,255,255,0.15);z-index:10000;font-size:13px;}
-            .tabs{display:flex;margin-bottom:8px;flex-wrap:wrap;}
-            .tab-btn{flex:1;background:#334155;border:none;padding:6px;margin:1px;border-radius:6px;cursor:pointer;color:#cbd5e1;font-weight:bold;font-size:12px;}
-            .tab-btn.active{background:#3b82f6;color:white;}
-            .tab-content{display:none;max-height:320px;overflow:auto;}
-            .tab-content.active{display:block;}
-            .hidden{display:none!important;}
-            .utility-btn{background:#3b82f6;border:none;padding:6px 8px;border-radius:6px;cursor:pointer;color:white;margin:4px 0;font-size:12px;font-weight:bold;}
-            .utility-btn:hover{background:#2563eb;}
-            .input-box{width:100%;padding:6px;margin:4px 0;border-radius:6px;border:1px solid #475569;background:rgba(51,65,85,0.8);color:white;}
-            .log-entry{border-bottom:1px solid #475569;padding:4px 0;}
-        </style>
+    // ================= STYLES =================
+    const style = document.createElement("style");
+    style.textContent = `
+      #geofs-utility-btn {
+        position: fixed; bottom: 15px; left: 15px;
+        background: rgba(30,41,59,0.8); color: white;
+        border: none; border-radius: 50%; width: 50px; height: 50px;
+        font-size: 20px; cursor: pointer; z-index: 10001;
+        display: flex; align-items: center; justify-content: center;
+        box-shadow: 0 0 12px rgba(0,0,0,0.5);
+      }
+      #geofs-utility-panel {
+        position: fixed; top: 60px; right: 20px; width: 350px; max-height: 80vh;
+        background: rgba(30,41,59,0.95); color: white;
+        border-radius: 12px; padding: 16px; font-family: 'Segoe UI', sans-serif;
+        box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+        border: 1px solid rgba(255,255,255,0.1); z-index: 10000;
+        display: none; flex-direction: column;
+      }
+      .tab-buttons { display: flex; margin-bottom: 10px; }
+      .tab-buttons button {
+        flex: 1; padding: 6px; background: #374151; border: none;
+        color: white; cursor: pointer; border-radius: 6px 6px 0 0;
+      }
+      .tab-buttons button.active { background: #3b82f6; }
+      .tab-content { display: none; }
+      .tab-content.active { display: block; }
+      .input-box {
+        width: 100%; padding: 6px; margin-bottom: 8px;
+        background: #1f2937; border: 1px solid #4b5563;
+        border-radius: 6px; color: white;
+      }
+      .utility-btn {
+        width: 100%; background: #3b82f6; border: none;
+        padding: 8px; border-radius: 6px; color: white;
+        cursor: pointer; margin-bottom: 6px;
+      }
+      .utility-btn:hover { background: #2563eb; }
+      #squawk-indicator {
+        position: fixed; top: 10px; left: 50%; transform: translateX(-50%);
+        font-size: 22px; font-weight: bold;
+        color: red; text-shadow: 0 0 8px red;
+        display: none; z-index: 10002;
+      }
+      @keyframes blink {
+        0%, 50%, 100% { opacity: 1; }
+        25%, 75% { opacity: 0.2; }
+      }
+      .blink { animation: blink 1s infinite; }
+    `;
+    document.head.appendChild(style);
 
-        <div class="tabs">
-            <button class="tab-btn active" data-tab="timer">⏱ Timer</button>
-            <button class="tab-btn" data-tab="fuel">⛽ Fuel</button>
-            <button class="tab-btn" data-tab="logbook">📓 Logbook</button>
-            <button class="tab-btn" data-tab="route">🛫 Route</button>
+    // ================= UI =================
+    const button = document.createElement("button");
+    button.id = "geofs-utility-btn";
+    button.textContent = "⏱";
+    document.body.appendChild(button);
+
+    const panel = document.createElement("div");
+    panel.id = "geofs-utility-panel";
+    panel.innerHTML = `
+      <div class="tab-buttons">
+        <button data-tab="tab-timer" class="active">Timer</button>
+        <button data-tab="tab-fuel">Fuel</button>
+        <button data-tab="tab-log">Logbook</button>
+        <button data-tab="tab-route">Route</button>
+        <button data-tab="tab-squawk">Squawk</button>
+      </div>
+
+      <div id="tab-timer" class="tab-content active">
+        <button class="utility-btn" id="startTimer">Start Timer</button>
+        <button class="utility-btn" id="stopTimer">Stop Timer</button>
+        <div id="timerDisplay">00:00:00</div>
+      </div>
+
+      <div id="tab-fuel" class="tab-content">
+        <input id="fuelFlow" class="input-box" type="number" placeholder="Fuel Flow (kg/hr)">
+        <input id="fuelTime" class="input-box" type="number" placeholder="Flight Time (hrs)">
+        <button class="utility-btn" id="calcFuel">Calculate Fuel</button>
+        <div id="fuelResult"></div>
+      </div>
+
+      <div id="tab-log" class="tab-content">
+        <textarea id="logNotes" class="input-box" style="height:120px;" placeholder="Write your log notes here..."></textarea>
+        <button class="utility-btn" id="saveLog">Save Log Entry</button>
+        <button class="utility-btn" id="downloadLog">Download Logbook</button>
+        <div id="logEntries"></div>
+      </div>
+
+      <div id="tab-route" class="tab-content">
+        <input id="depCode" class="input-box" type="text" placeholder="Departure ICAO/IATA">
+        <input id="arrCode" class="input-box" type="text" placeholder="Destination ICAO/IATA">
+        <select id="aircraftSelect" class="input-box">
+          <option value="">-- Select Aircraft --</option>
+          <option value="PIPER">Piper Cub (75 kt)</option>
+          <option value="C172">Cessna 172 (120 kt)</option>
+          <option value="ALPHAJET">Alphajet PAF (420 kt)</option>
+          <option value="B737">Boeing 737-700 (450 kt)</option>
+          <option value="PHENOM100">Embraer Phenom 100 (390 kt)</option>
+          <option value="TWINOTTER">Twin Otter (180 kt)</option>
+          <option value="F16">F-16 Fighting Falcon (550 kt)</option>
+          <option value="PITTS">Pitts S1 Special (180 kt)</option>
+          <option value="A380">Airbus A380 (490 kt)</option>
+          <option value="DC3">Douglas DC-3 (180 kt)</option>
+          <option value="SU35">Sukhoi Su-35 (650 kt)</option>
+          <option value="CONC">Concorde (1150 kt)</option>
+          <option value="C152">Cessna 152 (110 kt)</option>
+          <option value="A350">Airbus A350-900 (480 kt)</option>
+          <option value="B77W">Boeing 777-300ER (480 kt)</option>
+          <option value="PC7">Pilatus PC-7 Mk1 (230 kt)</option>
+          <option value="DHC2">DHC-2 Beaver (140 kt)</option>
+          <option value="AN140">Antonov An-140 (270 kt)</option>
+          <option value="F18">F/A-18 Super Hornet (570 kt)</option>
+          <option value="B55">Beechcraft Baron B55 (190 kt)</option>
+          <option value="RAFALE">Dassault Rafale (600 kt)</option>
+        </select>
+        <button class="utility-btn" id="calcRoute">Calculate Route</button>
+        <div id="routeResult"></div>
+      </div>
+
+      <div id="tab-squawk" class="tab-content">
+        <input id="squawkCode" class="input-box" type="text" placeholder="Enter Squawk Code">
+        <button class="utility-btn" id="setSquawk">Set Squawk</button>
+        <button class="utility-btn" id="clearSquawk">Clear Squawk</button>
+        <div>
+          <button class="utility-btn" data-code="7500">7500 - Hijack</button>
+          <button class="utility-btn" data-code="7600">7600 - Radio Failure</button>
+          <button class="utility-btn" data-code="7700">7700 - Emergency</button>
         </div>
-
-        <div id="tab-timer" class="tab-content active">
-            <div id="timer-display">00:00:00</div>
-            <button class="utility-btn" id="start-timer">Start</button>
-            <button class="utility-btn" id="stop-timer">Stop</button>
-            <button class="utility-btn" id="reset-timer">Reset</button>
-        </div>
-
-        <div id="tab-fuel" class="tab-content">
-            <p>Fuel Remaining:</p>
-            <input class="input-box" id="fuel-current" placeholder="Enter manually (kg or %)">
-            <p>Burn Rate (kg/min):</p>
-            <input class="input-box" id="fuel-burn" placeholder="Enter burn rate manually">
-            <p>Endurance: <span id="fuel-endurance">-</span> min</p>
-        </div>
-
-        <div id="tab-logbook" class="tab-content">
-            <textarea id="log-notes" class="input-box" placeholder="Notes..."></textarea>
-            <button class="utility-btn" id="save-log">Save Entry</button>
-            <button class="utility-btn" id="download-log">Download Logbook</button>
-            <div id="log-entries"></div>
-        </div>
-
-        <div id="tab-route" class="tab-content">
-            <input class="input-box" id="route-departure" placeholder="Departure ICAO">
-            <input class="input-box" id="route-destination" placeholder="Destination ICAO">
-            <input class="input-box" id="route-speed" placeholder="Cruise speed (knots)">
-            <input class="input-box" id="route-altitude" placeholder="Altitude (ft)">
-            <button class="utility-btn" id="calculate-route">Calculate Time</button>
-            <p>Estimated Duration: <span id="route-duration">-</span> h</p>
-        </div>
+      </div>
     `;
     document.body.appendChild(panel);
-    return panel;
-}
 
-function createToggleButton(){
-    const btn=document.createElement('button');
-    btn.id='utility-toggle';
-    btn.textContent='🕒';
-    btn.style=`position:fixed;bottom:10px;left:10px;z-index:10001;background:#1e293b;color:white;border:none;border-radius:50%;width:36px;height:36px;font-size:16px;cursor:pointer;box-shadow:0 4px 12px rgba(0,0,0,0.3);`;
-    btn.onclick=()=>panel.classList.toggle('hidden');
-    document.body.appendChild(btn);
-    return btn;
-}
+    const squawkIndicator = document.createElement("div");
+    squawkIndicator.id = "squawk-indicator";
+    document.body.appendChild(squawkIndicator);
 
-class GeoFSUtilityPanel{
-    constructor(panel){
-        this.panel=panel;
-        this.timerInterval=null;
-        this.elapsedSeconds=0;
-        this.logbook=JSON.parse(localStorage.getItem('geofsLogbook')||'[]');
-        this.initTabs();
-        this.initTimer();
-        this.initFuel();
-        this.initLogbook();
-        this.initRouteCalculator();
-        console.log('GeoFS Flight Utility Panel loaded!');
+    // ================= LOGIC =================
+    button.onclick = () => panel.style.display = (panel.style.display==="flex"?"none":"flex");
+
+    // Tabs
+    panel.querySelectorAll(".tab-buttons button").forEach(btn=>{
+      btn.onclick=()=>{
+        panel.querySelectorAll(".tab-buttons button").forEach(b=>b.classList.remove("active"));
+        panel.querySelectorAll(".tab-content").forEach(tc=>tc.classList.remove("active"));
+        btn.classList.add("active");
+        panel.querySelector("#"+btn.dataset.tab).classList.add("active");
+      };
+    });
+
+    // Timer
+    let timerInt, startTime;
+    function updateTimer(){
+      const diff=Date.now()-startTime;
+      const hrs=Math.floor(diff/3600000);
+      const mins=Math.floor((diff%3600000)/60000);
+      const secs=Math.floor((diff%60000)/1000);
+      document.getElementById("timerDisplay").textContent=
+        [hrs,mins,secs].map(v=>String(v).padStart(2,"0")).join(":");
     }
+    document.getElementById("startTimer").onclick=()=>{
+      if(timerInt) return;
+      startTime=Date.now(); updateTimer();
+      timerInt=setInterval(updateTimer,1000);
+    };
+    document.getElementById("stopTimer").onclick=()=>{
+      clearInterval(timerInt); timerInt=null;
+    };
 
-    initTabs(){
-        const tabButtons=this.panel.querySelectorAll('.tab-btn');
-        tabButtons.forEach(btn=>{
-            btn.addEventListener('click',()=>{
-                tabButtons.forEach(b=>b.classList.remove('active'));
-                btn.classList.add('active');
-                const tabContents=this.panel.querySelectorAll('.tab-content');
-                tabContents.forEach(c=>c.classList.remove('active'));
-                this.panel.querySelector(`#tab-${btn.dataset.tab}`).classList.add('active');
-            });
-        });
+    // Fuel
+    document.getElementById("calcFuel").onclick=()=>{
+      const flow=parseFloat(document.getElementById("fuelFlow").value);
+      const time=parseFloat(document.getElementById("fuelTime").value);
+      if(isNaN(flow)||isNaN(time)) return;
+      document.getElementById("fuelResult").textContent=`Fuel Required: ${(flow*time).toFixed(1)} kg`;
+    };
+
+    // Logbook
+    const logKey="geofsLogbook";
+    const logEntries=JSON.parse(localStorage.getItem(logKey)||"[]");
+    function renderLog(){
+      document.getElementById("logEntries").innerHTML=logEntries.map(e=>`<div>• ${e}</div>`).join("");
     }
+    renderLog();
+    document.getElementById("saveLog").onclick=()=>{
+      const note=document.getElementById("logNotes").value.trim();
+      if(note){logEntries.push(note);localStorage.setItem(logKey,JSON.stringify(logEntries));renderLog();}
+      document.getElementById("logNotes").value="";
+    };
+    document.getElementById("downloadLog").onclick=()=>{
+      const blob=new Blob([logEntries.join("\n")],{type:"text/plain"});
+      const a=document.createElement("a");
+      a.href=URL.createObjectURL(blob);a.download="logbook.txt";a.click();
+    };
 
-    initTimer(){
-        const display=document.getElementById('timer-display');
-        document.getElementById('start-timer').onclick=()=>{
-            if(this.timerInterval) return;
-            this.timerInterval=setInterval(()=>{
-                this.elapsedSeconds++;
-                const h=String(Math.floor(this.elapsedSeconds/3600)).padStart(2,'0');
-                const m=String(Math.floor((this.elapsedSeconds%3600)/60)).padStart(2,'0');
-                const s=String(this.elapsedSeconds%60).padStart(2,'0');
-                display.textContent=`${h}:${m}:${s}`;
-            },1000);
-        };
-        document.getElementById('stop-timer').onclick=()=>{clearInterval(this.timerInterval);this.timerInterval=null;};
-        document.getElementById('reset-timer').onclick=()=>{this.elapsedSeconds=0;display.textContent='00:00:00';clearInterval(this.timerInterval);this.timerInterval=null;};
+    // Airports (sample db)
+    const airports={
+      "EDDF":{lat:50.033,lon:8.570},"FRA":{lat:50.033,lon:8.570},
+      "KJFK":{lat:40.641,lon:-73.778},"JFK":{lat:40.641,lon:-73.778},
+      "EGLL":{lat:51.4775,lon:-0.4614},"LHR":{lat:51.4775,lon:-0.4614},
+      "EHAM":{lat:52.308,lon:4.764},"AMS":{lat:52.308,lon:4.764},
+      "KLAX":{lat:33.9416,lon:-118.4085},"LAX":{lat:33.9416,lon:-118.4085},
+      "OMDB":{lat:25.253,lon:55.365},"DXB":{lat:25.253,lon:55.365}
+    };
+
+    const aircraftSpeeds={
+      "PIPER":75,"C172":120,"ALPHAJET":420,"B737":450,"PHENOM100":390,"TWINOTTER":180,
+      "F16":550,"PITTS":180,"A380":490,"DC3":180,"SU35":650,"CONC":1150,"C152":110,
+      "A350":480,"B77W":480,"PC7":230,"DHC2":140,"AN140":270,"F18":570,"B55":190,"RAFALE":600
+    };
+
+    document.getElementById("calcRoute").onclick=()=>{
+      const dep=document.getElementById("depCode").value.toUpperCase();
+      const arr=document.getElementById("arrCode").value.toUpperCase();
+      const aircraft=document.getElementById("aircraftSelect").value;
+      if(!dep||!arr||!aircraft||!airports[dep]||!airports[arr]){
+        document.getElementById("routeResult").textContent="Invalid input.";
+        return;
+      }
+      function hav(lat1,lon1,lat2,lon2){
+        const R=6371,toRad=d=>d*Math.PI/180;
+        const dLat=toRad(lat2-lat1),dLon=toRad(lon2-lon1);
+        const a=Math.sin(dLat/2)**2+Math.cos(toRad(lat1))*Math.cos(toRad(lat2))*Math.sin(dLon/2)**2;
+        return R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
+      }
+      const km=hav(airports[dep].lat,airports[dep].lon,airports[arr].lat,airports[arr].lon);
+      const nm=km/1.852;
+      const speed=aircraftSpeeds[aircraft];
+      const hrs=nm/speed;
+      const h=Math.floor(hrs), m=Math.floor((hrs-h)*60);
+      document.getElementById("routeResult").textContent=
+        `Route: ${dep} → ${arr}\nDistance: ${nm.toFixed(1)} NM (${km.toFixed(1)} km)\nAircraft: ${aircraft}\nETA: ~${h}h ${m}m`;
+    };
+
+    // Squawk
+    function setSquawk(code){
+      window.geofsSquawkCode=code;
+      squawkIndicator.textContent="SQUAWK "+code;
+      squawkIndicator.style.display="block";
+      squawkIndicator.classList.add("blink");
     }
-
-    initFuel(){
-        const fuelInput=document.getElementById('fuel-current');
-        const burnInput=document.getElementById('fuel-burn');
-        const enduranceSpan=document.getElementById('fuel-endurance');
-        [fuelInput,burnInput].forEach(input=>{
-            input.addEventListener('input',()=>{
-                const fuel=parseFloat(fuelInput.value);
-                const burn=parseFloat(burnInput.value);
-                if(fuel>0 && burn>0) enduranceSpan.textContent=Math.round(fuel/burn);
-            });
-        });
+    function clearSquawk(){
+      window.geofsSquawkCode=null;
+      squawkIndicator.style.display="none";
+      squawkIndicator.classList.remove("blink");
     }
+    document.getElementById("setSquawk").onclick=()=>{
+      const code=document.getElementById("squawkCode").value.trim();
+      if(code) setSquawk(code);
+    };
+    document.getElementById("clearSquawk").onclick=()=>clearSquawk();
+    document.querySelectorAll("#tab-squawk button[data-code]").forEach(btn=>{
+      btn.onclick=()=>setSquawk(btn.dataset.code);
+    });
 
-    initLogbook(){
-        const notes=document.getElementById('log-notes');
-        const saveBtn=document.getElementById('save-log');
-        const downloadBtn=document.getElementById('download-log');
-        const logEntries=document.getElementById('log-entries');
-        const renderLog=()=>{
-            logEntries.innerHTML='';
-            this.logbook.forEach(entry=>{
-                const div=document.createElement('div');
-                div.className='log-entry';
-                div.textContent=`${entry.date} - ${entry.text}`;
-                logEntries.appendChild(div);
-            });
-        };
-        saveBtn.onclick=()=>{
-            const text=notes.value.trim();
-            if(!text) return;
-            this.logbook.push({date:new Date().toLocaleString(),text});
-            localStorage.setItem('geofsLogbook',JSON.stringify(this.logbook));
-            notes.value='';
-            renderLog();
-        };
-        downloadBtn.onclick=()=>{
-            let content='';
-            this.logbook.forEach(entry=>content+=`${entry.date} - ${entry.text}\n`);
-            const blob=new Blob([content],{type:'text/plain'});
-            const url=URL.createObjectURL(blob);
-            const a=document.createElement('a');
-            a.href=url;a.download='GeoFS_Logbook.txt';a.click();URL.revokeObjectURL(url);
-        };
-        renderLog();
-    }
-
-    initRouteCalculator(){
-        const dep=document.getElementById('route-departure');
-        const dest=document.getElementById('route-destination');
-        const speedInput=document.getElementById('route-speed');
-        const altInput=document.getElementById('route-altitude');
-        const durationSpan=document.getElementById('route-duration');
-        document.getElementById('calculate-route').onclick=()=>{
-            const depVal=dep.value.trim().toUpperCase();
-            const destVal=dest.value.trim().toUpperCase();
-            const speed=parseFloat(speedInput.value);
-            if(!depVal||!destVal||isNaN(speed)||speed<=0){durationSpan.textContent='Invalid input';return;}
-            // Simplified straight-line distance: approximate
-            const lat1=0, lon1=0, lat2=1, lon2=1; // Placeholder: ideally fetch airport coords
-            const distanceNm=500; // Placeholder distance
-            const duration=distanceNm/speed;
-            durationSpan.textContent=duration.toFixed(2);
-        };
-    }
-}
-
-const panel=createPanel();
-createToggleButton();
-window.geofsUtilityPanel=new GeoFSUtilityPanel(panel);
+    console.log("GeoFS Flight Utility Panel loaded by AeroBaden");
 })();
