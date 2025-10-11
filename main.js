@@ -1,257 +1,447 @@
 // ==UserScript==
 // @name         GeoFS Flight Utility Panel
-// @version      1.0
-// @description  Flight Utility Panel: Timer, Fuel, Logbook, Route Calculator, Emergency Squawk Codes
+// @version      1.1
+// @description  GeoFS panel: Timer (pause/reset), Fuel, Logbook (TXT), Route Calculator (ICAO/IATA, default cruise), Emergency Squawk (overlay), Mouse-driven Calculator with flight helpers. Author: AeroBaden
 // @author       AeroBaden
 // @match        https://www.geo-fs.com/geofs.php?v=*
 // @match        https://*.geo-fs.com/geofs.php*
 // @grant        none
 // ==/UserScript==
 
-(function() {
-    'use strict';
-    if(window.geofsUtilityPanel) return;
+(function () {
+  'use strict';
+  if (window.geofsUtilityPanel) return;
+  window.geofsUtilityPanel = true;
 
-    // ================= Styles =================
-    const style = document.createElement("style");
-    style.textContent = `
-    #geofs-utility-btn { position: fixed; bottom: 15px; left: 15px; background: rgba(30,41,59,0.8); color: white; border: none; border-radius: 50%; width: 50px; height: 50px; font-size: 20px; cursor: pointer; z-index: 10001; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 12px rgba(0,0,0,0.5);}
-    #geofs-utility-panel { position: fixed; top: 60px; right: 20px; width: 360px; max-height: 80vh; background: rgba(30,41,59,0.95); color: white; border-radius: 12px; padding: 16px; font-family: 'Segoe UI', sans-serif; box-shadow: 0 8px 32px rgba(0,0,0,0.5); border: 1px solid rgba(255,255,255,0.1); z-index: 10000; display: none; flex-direction: column; overflow-y: auto;}
-    .tab-buttons { display: flex; margin-bottom: 10px; }
-    .tab-buttons button { flex: 1; padding: 6px; background: #374151; border: none; color: white; cursor: pointer; border-radius: 6px 6px 0 0;}
-    .tab-buttons button.active { background: #3b82f6;}
-    .tab-content { display: none; }
-    .tab-content.active { display: block; }
-    .input-box { width: 100%; padding: 6px; margin-bottom: 8px; background: #1f2937; border: 1px solid #4b5563; border-radius: 6px; color: white; }
-    .utility-btn { width: 100%; background: #3b82f6; border: none; padding: 8px; border-radius: 6px; color: white; cursor: pointer; margin-bottom: 6px; }
-    .utility-btn:hover { background: #2563eb; }
-    #squawk-indicator { position: fixed; top: 10px; left: 50%; transform: translateX(-50%); font-size: 22px; font-weight: bold; color: red; text-shadow: 0 0 8px red; display: none; z-index: 10002; }
-    @keyframes blink { 0%,50%,100%{opacity:1;} 25%,75%{opacity:0.2;} }
-    .blink { animation: blink 1s infinite; }
-    `;
-    document.head.appendChild(style);
+  /* ---------- STYLES ---------- */
+  const style = document.createElement('style');
+  style.textContent = `
+    #gfu-btn { position: fixed; bottom: 12px; left: 12px; z-index:10050;
+      width:44px;height:44px;border-radius:8px;background:#1e293b;color:#fff;border:none;font-size:18px;
+      display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(0,0,0,0.4);cursor:pointer;}
+    #gfu-panel { position: fixed; top: 60px; right: 20px; width:420px; max-height:82vh; overflow:auto;
+      background: rgba(17,24,39,0.97); color: #e6eef8; border-radius:12px; padding:12px; z-index:10050;
+      box-shadow:0 12px 40px rgba(2,6,23,0.6); border:1px solid rgba(255,255,255,0.04); font-family: 'Segoe UI', sans-serif; font-size:13px; display:none;}
+    .gfu-tabs { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+    .gfu-tab-btn { flex:1; padding:6px 8px; background:#0f1724; color:#9fb3d6; border-radius:6px; border:none; cursor:pointer; font-weight:600;}
+    .gfu-tab-btn.active { background:#2563eb; color:#fff; }
+    .gfu-tab { display:none; }
+    .gfu-tab.active { display:block; }
+    .gfu-input { width:100%; padding:8px; margin:6px 0; border-radius:6px; border:1px solid #334155; background:#0b1220; color:#e6eef8; }
+    .gfu-btn { width:100%; background:#2563eb; border:none; color:white; padding:8px; border-radius:6px; cursor:pointer; margin:6px 0; }
+    .gfu-btn.small { width:auto; padding:6px 8px; display:inline-block; margin-right:6px; }
+    .gfu-result { background:rgba(255,255,255,0.02); padding:8px; border-radius:6px; margin-top:6px; white-space:pre-wrap; color:#dbeafe; }
+    .gfu-log-entry { padding:6px 4px; border-bottom:1px solid rgba(255,255,255,0.03); }
+    #gfu-squawk-overlay { position: fixed; top:10px; left:50%; transform:translateX(-50%); z-index:10060;
+      background:rgba(255,0,0,0.06); padding:8px 14px; border-radius:8px; color:#ffdddd; font-weight:700; display:none;
+      box-shadow:0 0 18px rgba(255,0,0,0.15); font-size:20px; }
+    @keyframes gfu-blink { 0%{opacity:1;} 50%{opacity:0.15;} 100%{opacity:1;} }
+    .gfu-blink { animation: gfu-blink 1s infinite; color: #ffb3b3; text-shadow:0 0 8px rgba(255,0,0,0.25); }
+    /* Calculator grid */
+    .calc-display { background:#071022; padding:10px; border-radius:6px; color:#cfe8ff; font-size:18px; text-align:right; min-height:34px; }
+    .calc-grid { display:grid; grid-template-columns: repeat(4, 1fr); gap:6px; margin-top:8px; }
+    .calc-key { background:#0f1724; border:1px solid #16202b; padding:10px; border-radius:6px; text-align:center; cursor:pointer; color:#d7ecff; font-weight:600; user-select:none; }
+    .calc-key.op { background:#184b8a; }
+    .calc-key.action { background:#2a303a; }
+  `;
+  document.head.appendChild(style);
 
-    // ================= UI =================
-    const button = document.createElement("button");
-    button.id = "geofs-utility-btn";
-    button.textContent = "⏱";
-    document.body.appendChild(button);
+  /* ---------- UI ---------- */
+  const btn = document.createElement('button');
+  btn.id = 'gfu-btn';
+  btn.title = 'GeoFS Flight Utility';
+  btn.innerText = '⏱';
+  document.body.appendChild(btn);
 
-    const panel = document.createElement("div");
-    panel.id = "geofs-utility-panel";
-    panel.innerHTML = `
-      <div class="tab-buttons">
-        <button data-tab="tab-timer" class="active">Timer</button>
-        <button data-tab="tab-fuel">Fuel</button>
-        <button data-tab="tab-log">Logbook</button>
-        <button data-tab="tab-route">Route</button>
-        <button data-tab="tab-squawk">Squawk</button>
+  const panel = document.createElement('div');
+  panel.id = 'gfu-panel';
+  panel.innerHTML = `
+    <div class="gfu-tabs">
+      <button class="gfu-tab-btn active" data-tab="tab-timer">Timer</button>
+      <button class="gfu-tab-btn" data-tab="tab-fuel">Fuel</button>
+      <button class="gfu-tab-btn" data-tab="tab-log">Logbook</button>
+      <button class="gfu-tab-btn" data-tab="tab-route">Route</button>
+      <button class="gfu-tab-btn" data-tab="tab-squawk">Squawk</button>
+      <button class="gfu-tab-btn" data-tab="tab-calc">Calculator</button>
+    </div>
+
+    <div id="tab-timer" class="gfu-tab active">
+      <div style="display:flex;gap:8px;">
+        <button class="gfu-btn" id="gfu-start">Start / Resume</button>
+        <button class="gfu-btn" id="gfu-pause">Pause</button>
+        <button class="gfu-btn" id="gfu-reset">Reset</button>
       </div>
+      <div id="gfu-timer-display" class="gfu-result" style="font-size:20px;text-align:center;">00:00:00</div>
+    </div>
 
-      <div id="tab-timer" class="tab-content active">
-        <button class="utility-btn" id="startTimer">Start/Resume</button>
-        <button class="utility-btn" id="pauseTimer">Pause</button>
-        <button class="utility-btn" id="resetTimer">Reset</button>
-        <div id="timerDisplay">00:00:00</div>
+    <div id="tab-fuel" class="gfu-tab">
+      <input id="gfu-fuel-flow" class="gfu-input" placeholder="Fuel flow (kg/hr)">
+      <input id="gfu-fuel-time" class="gfu-input" placeholder="Flight time (hours)">
+      <button class="gfu-btn" id="gfu-calc-fuel">Calculate Fuel Required</button>
+      <div id="gfu-fuel-result" class="gfu-result"></div>
+    </div>
+
+    <div id="tab-log" class="gfu-tab">
+      <textarea id="gfu-log-text" class="gfu-input" rows="5" placeholder="Notes..."></textarea>
+      <div style="display:flex;gap:8px;">
+        <button class="gfu-btn" id="gfu-save-log">Save Entry</button>
+        <button class="gfu-btn" id="gfu-download-log">Download .txt</button>
       </div>
+      <div id="gfu-log-list" class="gfu-result"></div>
+    </div>
 
-      <div id="tab-fuel" class="tab-content">
-        <input id="fuelFlow" class="input-box" type="number" placeholder="Fuel Flow (kg/hr)">
-        <input id="fuelTime" class="input-box" type="number" placeholder="Flight Time (hrs)">
-        <button class="utility-btn" id="calcFuel">Calculate Fuel</button>
-        <div id="fuelResult"></div>
+    <div id="tab-route" class="gfu-tab">
+      <input id="gfu-dep" class="gfu-input" placeholder="Departure ICAO/IATA (e.g. EDDF or FRA)">
+      <input id="gfu-arr" class="gfu-input" placeholder="Destination ICAO/IATA (e.g. KJFK or JFK)">
+      <div style="display:flex;gap:8px;">
+        <button class="gfu-btn" id="gfu-calc-route">Calculate Route (default cruise 450 kt)</button>
+        <button class="gfu-btn" id="gfu-clear-route">Clear</button>
       </div>
+      <div id="gfu-route-result" class="gfu-result"></div>
+    </div>
 
-      <div id="tab-log" class="tab-content">
-        <textarea id="logNotes" class="input-box" style="height:120px;" placeholder="Write your log notes here..."></textarea>
-        <button class="utility-btn" id="saveLog">Save Log Entry</button>
-        <button class="utility-btn" id="downloadLog">Download Logbook</button>
-        <div id="logEntries"></div>
+    <div id="tab-squawk" class="gfu-tab">
+      <input id="gfu-squawk-input" class="gfu-input" placeholder="Enter squawk code (4 digits)">
+      <div style="display:flex;gap:8px;">
+        <button class="gfu-btn" id="gfu-set-squawk">Set Squawk</button>
+        <button class="gfu-btn" id="gfu-clear-squawk">Clear</button>
       </div>
-
-      <div id="tab-route" class="tab-content">
-        <input id="depCode" class="input-box" type="text" placeholder="Departure ICAO/IATA">
-        <input id="arrCode" class="input-box" type="text" placeholder="Destination ICAO/IATA">
-        <select id="aircraftSelect" class="input-box">
-          <option value="">-- Select Aircraft --</option>
-          <option value="PIPER">Piper Cub (75 kt)</option>
-          <option value="C172">Cessna 172 (120 kt)</option>
-          <option value="ALPHAJET">Alphajet PAF (420 kt)</option>
-          <option value="B737">Boeing 737-700 (450 kt)</option>
-          <option value="PHENOM100">Embraer Phenom 100 (390 kt)</option>
-          <option value="TWINOTTER">Twin Otter (180 kt)</option>
-          <option value="F16">F-16 Fighting Falcon (550 kt)</option>
-          <option value="PITTS">Pitts S1 Special (180 kt)</option>
-          <option value="A380">Airbus A380 (490 kt)</option>
-          <option value="DC3">Douglas DC-3 (180 kt)</option>
-          <option value="SU35">Sukhoi Su-35 (650 kt)</option>
-          <option value="CONC">Concorde (1150 kt)</option>
-          <option value="C152">Cessna 152 (110 kt)</option>
-          <option value="A350">Airbus A350-900 (480 kt)</option>
-          <option value="B77W">Boeing 777-300ER (480 kt)</option>
-          <option value="PC7">Pilatus PC-7 Mk1 (230 kt)</option>
-          <option value="DHC2">DHC-2 Beaver (140 kt)</option>
-          <option value="AN140">Antonov An-140 (270 kt)</option>
-          <option value="F18">F/A-18 Super Hornet (570 kt)</option>
-          <option value="B55">Beechcraft Baron B55 (190 kt)</option>
-          <option value="RAFALE">Dassault Rafale (600 kt)</option>
-        </select>
-        <button class="utility-btn" id="calcRoute">Calculate Route</button>
-        <div id="routeResult"></div>
+      <div style="display:flex;gap:6px;margin-top:8px;">
+        <button class="gfu-btn small" data-code="7500">7500</button>
+        <button class="gfu-btn small" data-code="7600">7600</button>
+        <button class="gfu-btn small" data-code="7700">7700</button>
       </div>
+      <div id="gfu-squawk-status" class="gfu-result"></div>
+    </div>
 
-      <div id="tab-squawk" class="tab-content">
-        <input id="squawkCode" class="input-box" type="text" placeholder="Enter Squawk Code">
-        <button class="utility-btn" id="setSquawk">Set Squawk</button>
-        <button class="utility-btn" id="clearSquawk">Clear Squawk</button>
-        <div>
-          <button class="utility-btn" data-code="7500">7500 - Hijack</button>
-          <button class="utility-btn" data-code="7600">7600 - Radio Failure</button>
-          <button class="utility-btn" data-code="7700">7700 - Emergency</button>
-        </div>
+    <div id="tab-calc" class="gfu-tab">
+      <div class="calc-display" id="calc-display">0</div>
+      <div class="calc-grid" id="calc-grid">
+        <!-- row 1 -->
+        <div class="calc-key" data-key="7">7</div>
+        <div class="calc-key" data-key="8">8</div>
+        <div class="calc-key" data-key="9">9</div>
+        <div class="calc-key op" data-key="/">÷</div>
+        <!-- row 2 -->
+        <div class="calc-key" data-key="4">4</div>
+        <div class="calc-key" data-key="5">5</div>
+        <div class="calc-key" data-key="6">6</div>
+        <div class="calc-key op" data-key="*">×</div>
+        <!-- row 3 -->
+        <div class="calc-key" data-key="1">1</div>
+        <div class="calc-key" data-key="2">2</div>
+        <div class="calc-key" data-key="3">3</div>
+        <div class="calc-key op" data-key="-">−</div>
+        <!-- row 4 -->
+        <div class="calc-key" data-key="0">0</div>
+        <div class="calc-key" data-key=".">.</div>
+        <div class="calc-key action" data-key="C">C</div>
+        <div class="calc-key op" data-key="+">+</div>
+        <!-- row 5 -->
+        <div class="calc-key action" data-key="fuel">Fuel Burn</div>
+        <div class="calc-key action" data-key="descent">Descent</div>
+        <div class="calc-key action" data-key="glide">Glide</div>
+        <div class="calc-key action" data-key="=">=</div>
       </div>
-    `;
-    document.body.appendChild(panel);
+      <div id="calc-help" class="gfu-result" style="margin-top:8px; font-size:12px;">
+        Special keys:<br>
+        <b>Fuel Burn</b> =&gt; multiply flow(kg/hr) × hours → kg (prompts)<br>
+        <b>Descent</b> =&gt; calculates Top Of Descent (NM) from altitude(ft), descent rate(fpm) &amp; groundspeed(kt) (prompts)<br>
+        <b>Glide</b> =&gt; glide distance (NM) from altitude(ft) &amp; glide ratio (e.g. 15) (prompts)
+      </div>
+    </div>
+  `;
+  document.body.appendChild(panel);
 
-    const squawkIndicator = document.createElement("div");
-    squawkIndicator.id="squawk-indicator";
-    document.body.appendChild(squawkIndicator);
+  const overlay = document.createElement('div');
+  overlay.id = 'gfu-squawk-overlay';
+  document.body.appendChild(overlay);
 
-    // ================= Logic =================
+  /* ---------- Small airport DB (ICAO/IATA) ---------- */
+  const AIRPORTS = {
+    "EDDF": { lat: 50.033, lon: 8.570 }, "FRA": { lat: 50.033, lon: 8.570 },
+    "KJFK": { lat: 40.641, lon: -73.778 }, "JFK": { lat: 40.641, lon: -73.778 },
+    "EGLL": { lat: 51.4775, lon: -0.4614 }, "LHR": { lat: 51.4775, lon: -0.4614 },
+    "EHAM": { lat: 52.308, lon: 4.764 }, "AMS": { lat: 52.308, lon: 4.764 },
+    "KLAX": { lat: 33.9416, lon: -118.4085 }, "LAX": { lat: 33.9416, lon: -118.4085 },
+    "OMDB": { lat: 25.253, lon: 55.365 }, "DXB": { lat: 25.253, lon: 55.365 },
+    "RJTT": { lat: 35.552, lon: 139.779 }, "HND": { lat: 35.552, lon: 139.779 },
+    "RJAA": { lat: 35.7647, lon: 140.386 }, "NRT": { lat: 35.7647, lon: 140.386 },
+    "EHAM": { lat: 52.308, lon: 4.764 }, "AMS": { lat: 52.308, lon: 4.764 }
+  };
 
-    // Toggle panel
-    button.onclick=()=> panel.style.display = (panel.style.display==="flex"?"none":"flex");
+  /* ---------- Helpers ---------- */
+  function toUpperTrim(s) { return (s || '').toString().trim().toUpperCase(); }
 
-    // Tabs
-    panel.querySelectorAll(".tab-buttons button").forEach(btn=>{
-        btn.onclick=()=>{
-            panel.querySelectorAll(".tab-buttons button").forEach(b=>b.classList.remove("active"));
-            panel.querySelectorAll(".tab-content").forEach(tc=>tc.classList.remove("active"));
-            btn.classList.add("active");
-            panel.querySelector("#"+btn.dataset.tab).classList.add("active");
-        };
+  function haversineKm(lat1, lon1, lat2, lon2) {
+    const R = 6371;
+    const r = Math.PI / 180;
+    const dLat = (lat2 - lat1) * r;
+    const dLon = (lon2 - lon1) * r;
+    const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(lat1 * r) * Math.cos(lat2 * r) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  }
+
+  function formatDurationFromHours(hours) {
+    const totalMinutes = Math.round(hours * 60);
+    const days = Math.floor(totalMinutes / (24 * 60));
+    const hrs = Math.floor((totalMinutes % (24 * 60)) / 60);
+    const mins = totalMinutes % 60;
+    return (days > 0 ? `${days}d ` : '') + `${hrs}h ${mins}m`;
+  }
+
+  /* ---------- Panel behavior ---------- */
+  btn.addEventListener('click', () => {
+    panel.style.display = panel.style.display === 'flex' ? 'none' : 'flex';
+  });
+
+  panel.querySelectorAll('.gfu-tab-btn').forEach(b => {
+    b.addEventListener('click', () => {
+      panel.querySelectorAll('.gfu-tab-btn').forEach(x => x.classList.remove('active'));
+      panel.querySelectorAll('.gfu-tab').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      const tab = b.dataset.tab;
+      const el = document.getElementById(tab);
+      if (el) el.classList.add('active');
     });
+  });
 
-    // Timer
-    let timerInterval, startTime, elapsedTime=0;
-    const timerDisplay = document.getElementById("timerDisplay");
+  /* ---------- Timer (start/resume/pause/reset) ---------- */
+  let timerInterval = null;
+  let startTime = 0; // timestamp when started (ms)
+  let elapsed = 0; // ms elapsed before running (ms)
 
-    document.getElementById("startTimer").onclick = ()=>{
-        if(!timerInterval){
-            startTime = Date.now()-elapsedTime;
-            timerInterval=setInterval(updateTimer,1000);
-        }
-    };
-    document.getElementById("pauseTimer").onclick = ()=>{
-        if(timerInterval){ clearInterval(timerInterval); timerInterval=null;}
-    };
-    document.getElementById("resetTimer").onclick = ()=>{
-        clearInterval(timerInterval); timerInterval=null; elapsedTime=0;
-        timerDisplay.textContent="00:00:00";
-    };
-    function updateTimer(){
-        elapsedTime = Date.now()-startTime;
-        const hrs=Math.floor(elapsedTime/3600000);
-        const mins=Math.floor((elapsedTime%3600000)/60000);
-        const secs=Math.floor((elapsedTime%60000)/1000);
-        timerDisplay.textContent=[hrs,mins,secs].map(v=>String(v).padStart(2,"0")).join(":");
+  const timerDisplay = document.getElementById('gfu-timer-display');
+  function updateTimerDisplay() {
+    const ms = elapsed + (timerInterval ? Date.now() - startTime : 0);
+    const s = Math.floor(ms / 1000);
+    const hh = Math.floor(s / 3600); const mm = Math.floor((s % 3600) / 60); const ss = s % 60;
+    timerDisplay.textContent = `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:${String(ss).padStart(2, '0')}`;
+  }
+
+  document.getElementById('gfu-start').addEventListener('click', () => {
+    if (!timerInterval) {
+      startTime = Date.now();
+      timerInterval = setInterval(updateTimerDisplay, 250);
+      // If elapsed is 0 and no previous, startTime=now (already set)
     }
+  });
 
-    // Fuel
-    document.getElementById("calcFuel").onclick=()=>{
-        const flow=parseFloat(document.getElementById("fuelFlow").value);
-        const time=parseFloat(document.getElementById("fuelTime").value);
-        if(isNaN(flow)||isNaN(time)){document.getElementById("fuelResult").textContent="Invalid input"; return;}
-        document.getElementById("fuelResult").textContent=`Fuel Required: ${(flow*time).toFixed(1)} kg`;
-    };
-
-    // Logbook
-    const logKey="geofsLogbook";
-    let logEntries=JSON.parse(localStorage.getItem(logKey)||"[]");
-    const logEntriesDiv=document.getElementById("logEntries");
-
-    function renderLog(){
-        logEntriesDiv.innerHTML="";
-        logEntries.forEach((entry,i)=>{
-            const div=document.createElement("div");
-            div.textContent=`${i+1}. ${entry}`;
-            logEntriesDiv.appendChild(div);
-        });
+  document.getElementById('gfu-pause').addEventListener('click', () => {
+    if (timerInterval) {
+      clearInterval(timerInterval);
+      timerInterval = null;
+      elapsed += Date.now() - startTime;
+      updateTimerDisplay();
     }
+  });
+
+  document.getElementById('gfu-reset').addEventListener('click', () => {
+    if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
+    startTime = 0; elapsed = 0;
+    updateTimerDisplay();
+  });
+
+  updateTimerDisplay();
+
+  /* ---------- Fuel ---------- */
+  document.getElementById('gfu-calc-fuel').addEventListener('click', () => {
+    const flow = parseFloat(document.getElementById('gfu-fuel-flow').value);
+    const time = parseFloat(document.getElementById('gfu-fuel-time').value);
+    const out = document.getElementById('gfu-fuel-result');
+    if (isNaN(flow) || isNaN(time)) { out.textContent = 'Invalid input'; return; }
+    const req = flow * time;
+    // Show hours in hh:mm and dd:hh:mm
+    const hours = time;
+    const hhmm = formatDurationFromHours(hours);
+    out.textContent = `Fuel required: ${req.toFixed(1)} kg\nFlight time: ${hours.toFixed(2)} h (${hhmm})`;
+  });
+
+  /* ---------- Logbook ---------- */
+  const LOG_KEY = 'gfu_logbook_v1';
+  let logEntries = JSON.parse(localStorage.getItem(LOG_KEY) || '[]');
+  const logList = document.getElementById('gfu-log-list');
+
+  function renderLog() {
+    logList.innerHTML = '';
+    logEntries.forEach((e, i) => {
+      const d = document.createElement('div');
+      d.className = 'gfu-log-entry';
+      d.textContent = `${i + 1}. [${e.ts}] ${e.text}`;
+      logList.appendChild(d);
+    });
+  }
+  renderLog();
+
+  document.getElementById('gfu-save-log').addEventListener('click', () => {
+    const txt = document.getElementById('gfu-log-text').value.trim();
+    if (!txt) return;
+    logEntries.push({ ts: new Date().toLocaleString(), text: txt });
+    localStorage.setItem(LOG_KEY, JSON.stringify(logEntries));
+    document.getElementById('gfu-log-text').value = '';
     renderLog();
+  });
 
-    document.getElementById("saveLog").onclick=()=>{
-        const val=document.getElementById("logNotes").value.trim();
-        if(!val) return;
-        logEntries.push(val);
-        localStorage.setItem(logKey,JSON.stringify(logEntries));
-        document.getElementById("logNotes").value="";
-        renderLog();
-    };
+  document.getElementById('gfu-download-log').addEventListener('click', () => {
+    const lines = logEntries.map(e => `[${e.ts}] ${e.text}`).join('\n');
+    const blob = new Blob([lines], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = 'GeoFS_Logbook.txt'; a.click(); URL.revokeObjectURL(url);
+  });
 
-    document.getElementById("downloadLog").onclick=()=>{
-        const blob=new Blob([logEntries.join("\n")],{type:"text/plain"});
-        const url=URL.createObjectURL(blob);
-        const a=document.createElement("a");
-        a.href=url; a.download="GeoFS_Logbook.txt"; a.click();
-        URL.revokeObjectURL(url);
-    };
+  /* ---------- Route Calculator (no aircraft selection; default cruise = 450 kt) ---------- */
+  document.getElementById('gfu-calc-route').addEventListener('click', () => {
+    const dep = toUpperTrim(document.getElementById('gfu-dep').value);
+    const arr = toUpperTrim(document.getElementById('gfu-arr').value);
+    const out = document.getElementById('gfu-route-result');
+    if (!dep || !arr) { out.textContent = 'Please enter both departure and destination codes.'; return; }
+    const a1 = AIRPORTS[dep];
+    const a2 = AIRPORTS[arr];
+    if (!a1 || !a2) { out.textContent = 'Airport not found in DB. Use ICAO/IATA from the included list or add more airports.'; return; }
 
-    // Route Calculator
-    const aircraftSpeeds={
-        "PIPER":75,"C172":120,"ALPHAJET":420,"B737":450,"PHENOM100":390,"TWINOTTER":180,"F16":550,"PITTS":180,
-        "A380":490,"DC3":180,"SU35":650,"CONC":1150,"C152":110,"A350":480,"B77W":480,"PC7":230,"DHC2":140,"AN140":270,"F18":570,"B55":190,"RAFALE":600
-    };
-    const airports={
-        "KLAX":{lat:33.9416,lon:-118.4085},"LAX":{lat:33.9416,lon:-118.4085},
-        "KJFK":{lat:40.641,lon:-73.778},"JFK":{lat:40.641,lon:-73.778},
-        "EGLL":{lat:51.4775,lon:-0.4614},"LHR":{lat:51.4775,lon:-0.4614},
-        "EDDF":{lat:50.033,lon:8.570},"FRA":{lat:50.033,lon:8.570},
-        "EHAM":{lat:52.308,lon:4.764},"AMS":{lat:52.308,lon:4.764},
-        "OMDB":{lat:25.253,lon:55.365},"DXB":{lat:25.253,lon:55.365}
-    };
+    const km = haversineKm(a1.lat, a1.lon, a2.lat, a2.lon);
+    const nm = km / 1.852;
+    const cruise = 450; // default cruise speed in kt
+    const hours = nm / cruise;
+    const hh = Math.floor(hours);
+    const mm = Math.floor((hours - hh) * 60);
+    out.textContent = `Route: ${dep} → ${arr}\nDistance: ${nm.toFixed(1)} NM (${km.toFixed(1)} km)\nAssumed cruise: ${cruise} kt\nETA: ~${hh}h ${mm}m (${formatDurationFromHours(hours)})`;
+  });
 
-    document.getElementById("calcRoute").onclick=()=>{
-        const dep=document.getElementById("depCode").value.trim().toUpperCase();
-        const arr=document.getElementById("arrCode").value.trim().toUpperCase();
-        const ac=document.getElementById("aircraftSelect").value;
-        const resultDiv=document.getElementById("routeResult");
-        if(!airports[dep]||!airports[arr]||!ac){ resultDiv.textContent="Invalid input or aircraft not selected"; return;}
-        const toRad=d=>d*Math.PI/180;
-        const R=6371;
-        const dLat=toRad(airports[arr].lat-airports[dep].lat);
-        const dLon=toRad(airports[arr].lon-airports[dep].lon);
-        const a=Math.sin(dLat/2)**2+Math.cos(toRad(airports[dep].lat))*Math.cos(toRad(airports[arr].lat))*Math.sin(dLon/2)**2;
-        const km=R*2*Math.atan2(Math.sqrt(a),Math.sqrt(1-a));
-        const nm=km/1.852;
-        const hrs=nm/aircraftSpeeds[ac];
-        const h=Math.floor(hrs); const m=Math.floor((hrs-h)*60);
-        resultDiv.textContent=`Route: ${dep} → ${arr}\nDistance: ${nm.toFixed(1)} NM (${km.toFixed(1)} km)\nAircraft: ${ac}\nETA: ~${h}h ${m}m`;
-    };
+  document.getElementById('gfu-clear-route').addEventListener('click', () => {
+    document.getElementById('gfu-dep').value = '';
+    document.getElementById('gfu-arr').value = '';
+    document.getElementById('gfu-route-result').textContent = '';
+  });
 
-    // Squawk
-    let activeSquawk=null;
-    function updateSquawkUI(){
-        if(activeSquawk){ squawkIndicator.textContent=activeSquawk; squawkIndicator.style.display="block"; squawkIndicator.classList.add("blink"); }
-        else { squawkIndicator.style.display="none"; squawkIndicator.classList.remove("blink"); }
+  /* ---------- Squawk ---------- */
+  let activeSquawk = null;
+  function setSquawk(code) {
+    activeSquawk = code;
+    overlay.textContent = `SQUAWK ${code}`;
+    overlay.style.display = 'block';
+    overlay.classList.add('gfu-blink');
+    document.getElementById('gfu-squawk-status').textContent = `Active: ${code}`;
+    // try blinking aircraft model (best-effort; may fail silently)
+    try {
+      if (typeof geofs !== 'undefined' && geofs.aircraft && geofs.aircraft.instance && geofs.aircraft.instance.model && geofs.aircraft.instance.model.object3d) {
+        // add a CSS class to object3d element (if DOM-like) - Three.js objects don't accept classList
+        // Alternative: toggle visibility of a red sprite if present (not implemented). So this is a gentle best-effort:
+        const model = geofs.aircraft.instance.model;
+        if (model.object3d && model.object3d.traverse) {
+          model.object3d.traverse(o => {
+            if (o.material) {
+              if (o.material.emissive) {
+                o.material.emissive.setRGB(1, 0, 0);
+              }
+            }
+          });
+        }
+      }
+    } catch (e) { /* ignore */ }
+  }
+
+  function clearSquawk() {
+    activeSquawk = null;
+    overlay.style.display = 'none';
+    overlay.classList.remove('gfu-blink');
+    document.getElementById('gfu-squawk-status').textContent = 'No active squawk';
+  }
+
+  document.getElementById('gfu-set-squawk').addEventListener('click', () => {
+    const code = toUpperTrim(document.getElementById('gfu-squawk-input').value);
+    if (!/^\d{3,4}$/.test(code)) { document.getElementById('gfu-squawk-status').textContent = 'Enter 3 or 4 digit code'; return; }
+    setSquawk(code);
+  });
+
+  document.getElementById('gfu-clear-squawk').addEventListener('click', () => { clearSquawk(); });
+
+  panel.querySelectorAll('#tab-squawk button[data-code]').forEach(b => {
+    b.addEventListener('click', () => setSquawk(b.dataset.code));
+  });
+
+  /* ---------- Calculator (mouse-driven) ---------- */
+  const calcDisplay = document.getElementById('calc-display');
+  let calcExpr = ''; // expression string
+
+  function showCalc(val) { calcDisplay.textContent = val; }
+
+  function clearCalc() { calcExpr = ''; showCalc('0'); }
+
+  function pushCalc(key) {
+    if (key === 'C') { clearCalc(); return; }
+    if (key === '=') {
+      try {
+        // sanitize: allow digits, operators + - * / . and parentheses
+        const safe = calcExpr.replace(/[^0-9+\-*/(). ]/g, '');
+        const res = Function(`"use strict";return (${safe})`)(); // evaluate
+        showCalc(String(res));
+        calcExpr = String(res);
+      } catch (e) {
+        showCalc('Error');
+        calcExpr = '';
+      }
+      return;
     }
+    // append number or operator
+    calcExpr += key;
+    showCalc(calcExpr);
+  }
 
-    document.getElementById("setSquawk").onclick=()=>{
-        const code=document.getElementById("squawkCode").value.trim();
-        if(!code) return;
-        activeSquawk=code;
-        updateSquawkUI();
-    };
-    document.getElementById("clearSquawk").onclick=()=>{
-        activeSquawk=null;
-        updateSquawkUI();
-    };
-    panel.querySelectorAll("#tab-squawk .utility-btn[data-code]").forEach(btn=>{
-        btn.onclick=()=>{
-            activeSquawk=btn.dataset.code;
-            updateSquawkUI();
-        };
-    });
+  // special flight helpers
+  async function handleFuelBurn() {
+    const flowStr = prompt('Fuel flow (kg/hr)?', '800');
+    const timeStr = prompt('Time (hours)?', '2');
+    const flow = parseFloat(flowStr), time = parseFloat(timeStr);
+    if (isNaN(flow) || isNaN(time)) { alert('Invalid numbers'); return; }
+    const used = flow * time;
+    showCalc(`${used.toFixed(1)} kg`);
+    calcExpr = String(used);
+  }
 
-    window.geofsUtilityPanel=true;
+  async function handleDescent() {
+    // TOD approximate: distance_nm = (alt_ft / (descent_rate_fpm)) * (groundspeed_kt / 60)
+    const altStr = prompt('Alt (feet)?', '30000');
+    const rateStr = prompt('Descent rate (fpm)?', '1800');
+    const gsStr = prompt('Groundspeed (kt)?', '450');
+    const alt = parseFloat(altStr), rate = parseFloat(rateStr), gs = parseFloat(gsStr);
+    if (isNaN(alt) || isNaN(rate) || isNaN(gs) || rate <= 0) { alert('Invalid numbers'); return; }
+    const hours = alt / (rate * 60); // WRONG formula? correct: time (hrs) = alt(ft)/rate(fpm)/60
+    const timeHrs = (alt / rate) / 60; // alt (ft) / rate (ft/min) = minutes; /60 => hours
+    const nm = timeHrs * gs;
+    showCalc(`${nm.toFixed(1)} NM (TOD)`); calcExpr = String(nm.toFixed(1));
+  }
+
+  async function handleGlide() {
+    // glide distance (NM) = (alt_ft / 6076) * glide_ratio
+    const altStr = prompt('Altitude (feet)?', '10000');
+    const ratioStr = prompt('Glide ratio (e.g. 15 means 15:1)?', '15');
+    const alt = parseFloat(altStr), ratio = parseFloat(ratioStr);
+    if (isNaN(alt) || isNaN(ratio) || ratio <= 0) { alert('Invalid numbers'); return; }
+    const nm = (alt / 6076) * ratio;
+    showCalc(`${nm.toFixed(1)} NM (glide)`); calcExpr = String(nm.toFixed(1));
+  }
+
+  document.getElementById('calc-grid').addEventListener('click', (ev) => {
+    const keyEl = ev.target.closest('.calc-key');
+    if (!keyEl) return;
+    const k = keyEl.dataset.key;
+    if (!k) return;
+    if (k === 'fuel') return handleFuelBurn();
+    if (k === 'descent') return handleDescent();
+    if (k === 'glide') return handleGlide();
+    if (k === 'C') { clearCalc(); return; }
+    if (k === '=') { pushCalc('='); return; }
+    // numeric or operator
+    pushCalc(k);
+  });
+
+  clearCalc();
+
+  /* ---------- initial small message ---------- */
+  console.log('GeoFS Flight Utility Panel v1.1 loaded (AeroBaden)');
+
 })();
